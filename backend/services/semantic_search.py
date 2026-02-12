@@ -18,7 +18,7 @@ def semantic_search_committee(
     query: str,
     meeting_external_id: str | None = None,
     doc_type: str | None = None,
-    top_k: int = 20,
+    top_k: int = 40,
 ) -> List[SearchHit]:
     """
     Semantic search over all DocumentChunk embeddings using FAISS.

@@ -19,7 +19,7 @@ from backend.core.paths import (
     committee_docs_root,
     sanitize_name,
 )
-from backend.services.ingest import ingest_document
+from backend.services.ingest import ingest_document_langchain
 from backend.core.auth import require_ddm_token
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -28,7 +28,7 @@ logger = logging.getLogger("documents")
 
 @router.post("/upload", response_model=DocumentRead)
 async def upload_document(
-    _auth: None = Depends(require_ddm_token),
+    # _auth: None = Depends(require_ddm_token),
     external_committee_id: str = Form(...),
     doc_type: str = Form(...),
     file: UploadFile = File(...),
@@ -185,7 +185,7 @@ async def upload_document(
                 )
 
         try:
-            ingest_document(db, document)
+            ingest_document_langchain(db, document)
         except Exception:
             traceback.print_exc()
             logger.exception("Ingest failed for document_id=%s file_path=%s", document.id, document.file_path)
