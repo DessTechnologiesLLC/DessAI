@@ -17,8 +17,7 @@ with st.sidebar:
         else:
             st.warning("Health endpoint returned unexpected response.")
     except Exception as e:
-        st.error(f"Cannot reach backend: {e}")
-
+        st.error(f"Cannot reach backend: {e}")#test
 
 tab_search, tab_admin, tab_upload = st.tabs(
     ["🔍 Search (stub)", "🏗️ Committees & Meetings", "📄 Upload Documents"]
