@@ -268,6 +268,15 @@ def ingest_document(db: Session, document: Document) -> None:
 
 def parsing_loader(file_path: str, file_extension: str)->Optional[List[LangchainDocument]]:
     # from langchain_community.document_loaders import Docx2txtLoader
+    """
+    Parse a file using the appropriate LangChain document loader.
+
+    Supported file extensions include docx, doc, pdf, txt, xlsx, xls, csv, and pptx.
+
+    :param file_path: The path to the file to be parsed
+    :param file_extension: The extension of the file to be parsed
+    :return: A list of Langchain documents parsed from the file, or None if the extension is unsupported
+    """
     from langchain_community.document_loaders import PyMuPDFLoader
     from langchain_community.document_loaders import TextLoader
     from langchain_community.document_loaders.base import BaseLoader
@@ -305,6 +314,14 @@ def parsing_loader(file_path: str, file_extension: str)->Optional[List[Langchain
     return None
 
 def chunking_strategy(document: List[LangchainDocument])->List[LangchainDocument]:
+    """
+    Split a list of Langchain documents into a new list of Langchain documents
+    where each document is split into chunks of approximately 1000 characters
+    with an overlap of 200 characters between adjacent chunks.
+
+    :param document: A list of Langchain documents to be split
+    :return: A list of Langchain documents, each split into chunks
+    """
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 
     text_splitter = RecursiveCharacterTextSplitter(
