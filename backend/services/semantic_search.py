@@ -18,7 +18,7 @@ def semantic_search_committee(
     query: str,
     meeting_external_id: str | None = None,
     doc_type: str | None = None,
-    top_k: int = 20,
+    top_k: int = 10,
 ) -> List[SearchHit]:
     """
     Semantic search over all DocumentChunk embeddings using FAISS.
@@ -47,7 +47,7 @@ def semantic_search_committee(
         return []
 
     q_vec = embed_texts([query])
-    chunk_ids, scores = vector_index.search(q_vec[0], top_k=top_k * 3)
+    chunk_ids, scores = vector_index.search(q_vec[0], top_k=top_k * 5)
 
     if not chunk_ids:
         return []
