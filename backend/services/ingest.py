@@ -271,7 +271,7 @@ def parsing_loader(file_path: str, file_extension: str)->Optional[List[Langchain
     """
     Parse a file using the appropriate LangChain document loader.
 
-    Supported file extensions include docx, doc, pdf, txt, xlsx, xls, csv, and pptx.
+    Supported file extensions include docx, doc, pdf, txt, xlsx, xls, csv, ppt, and pptx.
 
     :param file_path: The path to the file to be parsed
     :param file_extension: The extension of the file to be parsed
@@ -293,6 +293,7 @@ def parsing_loader(file_path: str, file_extension: str)->Optional[List[Langchain
         'xls': UnstructuredExcelLoader,
         'csv': UnstructuredCSVLoader,
         'pptx': UnstructuredPowerPointLoader,
+        'ppt': UnstructuredPowerPointLoader
     }
 
     parsor:Optional[BaseLoader] = parsor_collections.get(file_extension.lower())
@@ -302,7 +303,7 @@ def parsing_loader(file_path: str, file_extension: str)->Optional[List[Langchain
         kwargs = dict(file_path=file_path)
 
         if file_extension == 'txt': kwargs['encoding'] = 'utf-8'
-        if file_extension in ('xlsx', 'xls', 'pptx'): kwargs['mode'] = 'elements'
+        if file_extension in ('xlsx', 'xls', 'pptx', 'ppt'): kwargs['mode'] = 'elements'
 
         loader:BaseLoader = parsor(**kwargs)
 
@@ -312,6 +313,7 @@ def parsing_loader(file_path: str, file_extension: str)->Optional[List[Langchain
     
     else: logging.warning("Unsupported extension %s for document %s", file_extension, file_path)
     return None
+
 
 def chunking_strategy(document: List[LangchainDocument])->List[LangchainDocument]:
     """
