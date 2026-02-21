@@ -95,6 +95,9 @@ def hybrid_search_committee(
             score=final_score,
             occurrence_count=kw.occurrence_count if kw else 0,
             ddm_url=base.ddm_url,
+            file_path=base.file_path if hasattr(base, "file_path") else None,
+            page_start=base.page_start if hasattr(base, "page_start") else None,
+            
         )
         combined.append(hit)
 

@@ -112,6 +112,8 @@ def search_committee(
             score=score,
             occurrence_count=occurrence_count,
             ddm_url=None,
+            file_path=doc.file_path if hasattr(doc, "file_path") else None,
+            page_start=chunk.page_start if hasattr(chunk, "page_start") else None,
         )
         results.append(hit)
 
