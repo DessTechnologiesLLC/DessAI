@@ -79,7 +79,7 @@ def semantic_search_committee(
         snippet = text[:300].replace("\n", " ")
 
         sim_score = float(score_map.get(chunk.id, 0.0))
-        if sim_score <= 0:
+        if sim_score <= 0.2:
             continue
 
         hit = SearchHit(
@@ -92,6 +92,8 @@ def semantic_search_committee(
             score=sim_score,
             occurrence_count=0,  
             ddm_url=None,
+            file_path=doc.file_path if hasattr(doc, "file_path") else None,
+            page_start=chunk.page_start if hasattr(chunk, "page_start") else None,
         )
         results.append(hit)
 

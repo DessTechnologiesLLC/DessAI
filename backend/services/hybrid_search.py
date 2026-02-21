@@ -78,6 +78,8 @@ def hybrid_search_committee(
         sem_score_norm = (sem.score / max_sem) if sem else 0.0
 
         final_score = w_sem * sem_score_norm + w_kw * kw_score_norm
+        if final_score <= 0.2:
+            continue
 
         base = kw or sem   
 
@@ -95,6 +97,9 @@ def hybrid_search_committee(
             score=final_score,
             occurrence_count=kw.occurrence_count if kw else 0,
             ddm_url=base.ddm_url,
+            file_path=base.file_path if hasattr(base, "file_path") else None,
+            page_start=base.page_start if hasattr(base, "page_start") else None,
+            
         )
         combined.append(hit)
 

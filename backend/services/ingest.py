@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import List
 
@@ -22,9 +23,19 @@ except ImportError:
     fitz = None  # type: ignore
 
 try:
-    import docx  # python-docx
+    import openpyxl # openpyxl
 except ImportError:
-    docx = None  # type: ignore
+    openpyxl = None  # type: ignore
+
+try:
+    from pptx import Presentation  # python-pptx
+except ImportError:
+    Presentation = None  # type: ignore
+
+try:
+    from docx2pdf import convert
+except ImportError:
+    docx2pdf = None  # type: ignore
 
 
 
@@ -44,18 +55,6 @@ def _read_pdf_pages(path: Path) -> List[tuple[int, str]]:
             pages.append((i + 1, text))
     doc.close()
     return pages
-
-
-def _read_docx_paragraphs(path: Path) -> List[str]:
-    """
-    Read DOCX paragraphs as a list of trimmed strings (empty removed).
-    """
-    if docx is None:
-        raise RuntimeError("python-docx is not installed")
-
-    d = docx.Document(str(path))
-    paras = [p.text.strip() for p in d.paragraphs if p.text and p.text.strip()]
-    return paras
 
 
 def _read_txt_text(path: Path) -> str:
@@ -90,74 +89,34 @@ def _chunk_long_text(text: str, max_chars: int = 1000) -> List[str]:
     return pieces
 
 
-def _looks_like_heading(para: str) -> bool:
+def _read_pptx_slides(path: Path) -> List[tuple[int, str]]:
     """
-    Very simple heuristic for board-style headings:
-    - short and ALL CAPS
-    - or ends with ':' (section title)
-    - or starts with a number / agenda item code like '1.' or '79/05'
+    Read PPTX slides as list of (slide_number, text) tuples.
+    Each slide's text is combined from all text shapes.
     """
-    p = para.strip()
-
-    if not p:
-        return False
-
-    if len(p) <= 80 and p.isupper():
-        return True
-
-    if p.endswith(":"):
-        return True
-
-    first_token = p.split(" ", 1)[0]
-    token = first_token.strip().rstrip(".")
-    if token.isdigit():
-        return True
-    if "/" in token:
-        left, _, right = token.partition("/")
-        if left.isdigit() and right.replace("-", "").isdigit():
-            return True
-
-    return False
-
-
-def _chunk_paragraphs(paragraphs: List[str], max_chars: int = 800) -> List[str]:
-    """
-    Chunk a list of paragraphs into ~max_chars chunks,
-    keeping paragraph boundaries and using headings as natural split points.
-
-    Ideal for board DOCX documents: each chunk ≈ one agenda item / section.
-    """
-    pieces: List[str] = []
-    buf: List[str] = []
-    current_len = 0
-
-    for para in paragraphs:
-        para = para.strip()
-        if not para:
-            continue
-
-        is_heading = _looks_like_heading(para)
-
-        if is_heading and buf:
-            pieces.append("\n".join(buf))
-            buf = [para]
-            current_len = len(para)
-            continue
-
-        if current_len + len(para) + 1 > max_chars and buf:
-            pieces.append("\n".join(buf))
-            buf = [para]
-            current_len = len(para)
-        else:
-            buf.append(para)
-            current_len += len(para) + 1
-
-    if buf:
-        pieces.append("\n".join(buf))
-
-    return pieces
-
-
+    if Presentation is None:
+        raise RuntimeError("python-pptx is not installed")
+    
+    slides_with_text: List[tuple[int, str]] = []
+    presentation = Presentation(path)
+    
+    for slide_number, slide in enumerate(presentation.slides, start=1):
+        slide_text_parts = []
+        for shape in slide.shapes:
+            if hasattr(shape, "text_frame"):
+                for paragraph in shape.text_frame.paragraphs:
+                    text_run = "".join(run.text for run in paragraph.runs)
+                    if text_run.strip():
+                        slide_text_parts.append(text_run.strip())
+            elif hasattr(shape, "text"):
+                if shape.text.strip():
+                    slide_text_parts.append(shape.text.strip())
+        
+        if slide_text_parts:
+            slide_text = "\n".join(slide_text_parts)
+            slides_with_text.append((slide_number, slide_text))
+    
+    return slides_with_text
 
 def ingest_document(db: Session, document: Document) -> None:
     """
@@ -184,37 +143,64 @@ def ingest_document(db: Session, document: Document) -> None:
         if ext == "pdf":
             if not path.exists():
                 raise FileNotFoundError(path)
-            pages = _read_pdf_pages(path)
-            for page_no, page_text in pages:
-                for piece in _chunk_long_text(page_text, max_chars=1200):
+            chunk_index = pdf_chunking(document, path, chunks, chunk_index)
+
+        elif ext in ("docx", "doc"):
+            if not path.exists():
+                raise FileNotFoundError(path)
+            try:
+                convert(str(path), str(path.with_suffix(".pdf")))
+                chunk_index = pdf_chunking(document, path.with_suffix(".pdf"), chunks, chunk_index)
+            except Exception as e:
+                logger.warning("DOCX to PDF conversion failed for document %s: %s", document.id, e)
+            finally:
+                # 3. Clean up the physical file
+                pdf_path = path.with_suffix(".pdf")
+                if os.path.exists(pdf_path):
+                    os.remove(pdf_path) # Deletes the file from the system
+        
+        elif ext in ("xlsx", "xls"):
+            if openpyxl is None:
+                raise RuntimeError("openpyxl is not installed, cannot ingest Excel files")
+            if not path.exists():
+                raise FileNotFoundError(path)
+            wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+            for sheet_number, sheet in enumerate(wb.worksheets, start=1):
+                sheet_text = []
+                for row in sheet.iter_rows(values_only=True):
+                    row_text = "\t".join(str(cell) if cell is not None else "" for cell in row)
+                    sheet_text.append(row_text)
+                full_text = "\n".join(sheet_text)
+                for piece in _chunk_long_text(full_text, max_chars=1000):
                     if not piece.strip():
                         continue
                     chunk = DocumentChunk(
                         document_id=document.id,
                         chunk_index=chunk_index,
                         text=piece,
-                        page_start=page_no,
-                        page_end=page_no,
+                        page_start=sheet_number,
+                        page_end=sheet_number,
                     )
                     chunks.append(chunk)
                     chunk_index += 1
-
-        elif ext in ("docx", "doc"):
+        
+        elif ext in ("pptx", "ppt"):         
             if not path.exists():
                 raise FileNotFoundError(path)
-            paragraphs = _read_docx_paragraphs(path)
-            for piece in _chunk_paragraphs(paragraphs, max_chars=800):
-                if not piece.strip():
-                    continue
-                chunk = DocumentChunk(
-                    document_id=document.id,
-                    chunk_index=chunk_index,
-                    text=piece,
-                    page_start=None,
-                    page_end=None,
-                )
-                chunks.append(chunk)
-                chunk_index += 1
+            slides_with_text = _read_pptx_slides(path)
+            for slide_no, slide_text in slides_with_text:
+                for piece in _chunk_long_text(slide_text, max_chars=1000):
+                    if not piece.strip():
+                        continue
+                    chunk = DocumentChunk(
+                        document_id=document.id,
+                        chunk_index=chunk_index,
+                        text=piece,
+                        page_start=slide_no,
+                        page_end=slide_no,
+                    )
+                    chunks.append(chunk)
+                    chunk_index += 1
 
         elif ext in ("txt",):
             if not path.exists():
@@ -404,3 +390,21 @@ def ingest_document_langchain(db: Session, document: Document) -> None:
     except Exception as e:
         db.rollback()
         logging.exception("Error ingesting document %s: %s", document.id, e)
+
+
+def pdf_chunking(document, path, chunks, chunk_index):
+    pages = _read_pdf_pages(path)
+    for page_no, page_text in pages:
+        for piece in _chunk_long_text(page_text, max_chars=1200):
+            if not piece.strip():
+                continue
+            chunk = DocumentChunk(
+                        document_id=document.id,
+                        chunk_index=chunk_index,
+                        text=piece,
+                        page_start=page_no,
+                        page_end=page_no,
+                    )
+            chunks.append(chunk)
+            chunk_index += 1
+    return chunk_index

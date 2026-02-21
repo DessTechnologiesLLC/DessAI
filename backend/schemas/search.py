@@ -19,6 +19,8 @@ class SearchHit(BaseModel):
     score: float
     occurrence_count: int
     ddm_url: str | None = None
+    file_path: str | None = None
+    page_start: int | None = None
 
 
 class SearchResponse(BaseModel):
