@@ -390,3 +390,21 @@ def ingest_document_langchain(db: Session, document: Document) -> None:
     except Exception as e:
         db.rollback()
         logging.exception("Error ingesting document %s: %s", document.id, e)
+
+
+def pdf_chunking(document, path, chunks, chunk_index):
+    pages = _read_pdf_pages(path)
+    for page_no, page_text in pages:
+        for piece in _chunk_long_text(page_text, max_chars=1200):
+            if not piece.strip():
+                continue
+            chunk = DocumentChunk(
+                        document_id=document.id,
+                        chunk_index=chunk_index,
+                        text=piece,
+                        page_start=page_no,
+                        page_end=page_no,
+                    )
+            chunks.append(chunk)
+            chunk_index += 1
+    return chunk_index
