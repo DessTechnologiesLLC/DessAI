@@ -12,6 +12,9 @@ from backend.models import Document, DocumentChunk
 from backend.services.embeddings import embed_texts
 from backend.services.vector_index import vector_index
 
+from langchain_core.documents import Document as LangchainDocument
+from typing import Optional, Dict
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -245,19 +248,145 @@ def ingest_document(db: Session, document: Document) -> None:
         db.rollback()
         logger.exception("Error ingesting document %s: %s", document.id, e)
 
-def pdf_chunking(document, path, chunks, chunk_index):
-    pages = _read_pdf_pages(path)
-    for page_no, page_text in pages:
-        for piece in _chunk_long_text(page_text, max_chars=1200):
-            if not piece.strip():
-                continue
-            chunk = DocumentChunk(
-                        document_id=document.id,
-                        chunk_index=chunk_index,
-                        text=piece,
-                        page_start=page_no,
-                        page_end=page_no,
-                    )
-            chunks.append(chunk)
-            chunk_index += 1
-    return chunk_index
+##########################################################################
+# Alternative ingestion using LangChain 
+##########################################################################
+
+def parsing_loader(file_path: str, file_extension: str)->Optional[List[LangchainDocument]]:
+    # from langchain_community.document_loaders import Docx2txtLoader
+    """
+    Parse a file using the appropriate LangChain document loader.
+
+    Supported file extensions include docx, doc, pdf, txt, xlsx, xls, csv, ppt, and pptx.
+
+    :param file_path: The path to the file to be parsed
+    :param file_extension: The extension of the file to be parsed
+    :return: A list of Langchain documents parsed from the file, or None if the extension is unsupported
+    """
+    from langchain_community.document_loaders import PyMuPDFLoader
+    from langchain_community.document_loaders import TextLoader
+    from langchain_community.document_loaders.base import BaseLoader
+    from langchain_community.document_loaders import (
+        UnstructuredExcelLoader, UnstructuredCSVLoader, UnstructuredPowerPointLoader
+    )
+    
+    parsor_collections: Dict[str, BaseLoader] = {
+        'docx': PyMuPDFLoader,
+        'doc': PyMuPDFLoader,
+        'pdf': PyMuPDFLoader,
+        'txt': TextLoader,
+        'xlsx': UnstructuredExcelLoader,  
+        'xls': UnstructuredExcelLoader,
+        'csv': UnstructuredCSVLoader,
+        'pptx': UnstructuredPowerPointLoader,
+        'ppt': UnstructuredPowerPointLoader
+    }
+
+    parsor:Optional[BaseLoader] = parsor_collections.get(file_extension.lower())
+
+    if parsor:
+
+        kwargs = dict(file_path=file_path)
+
+        if file_extension == 'txt': kwargs['encoding'] = 'utf-8'
+        if file_extension in ('xlsx', 'xls', 'pptx', 'ppt'): kwargs['mode'] = 'elements'
+
+        loader:BaseLoader = parsor(**kwargs)
+
+        documents = loader.load()
+        logging.info("Parsed %d pages/chunks from document %s", len(documents), file_path)
+        return documents
+    
+    else: logging.warning("Unsupported extension %s for document %s", file_extension, file_path)
+    return None
+
+
+def chunking_strategy(document: List[LangchainDocument])->List[LangchainDocument]:
+    """
+    Split a list of Langchain documents into a new list of Langchain documents
+    where each document is split into chunks of approximately 1000 characters
+    with an overlap of 200 characters between adjacent chunks.
+
+    :param document: A list of Langchain documents to be split
+    :return: A list of Langchain documents, each split into chunks
+    """
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        separators=["\n\n", "\n", " "],
+    )
+
+    return text_splitter.split_documents(
+        document
+    )
+
+
+    
+def ingest_document_langchain(db: Session, document: Document) -> None:
+    """
+    Read the document's file from disk, extract text, create DocumentChunk rows.
+
+    - PDF: per page, further split into ~1200-char chunks.
+    - DOCX/DOC: paragraph-aware chunking (~800 chars) with heading detection.
+    - TXT: simple ~1000-char chunks.
+
+    NOTE: This still only works for text-based PDFs, not scanned-image PDFs.
+    OCR will be added separately.
+    """
+
+    path = Path(document.file_path)
+    ext = document.file_extension.lower()
+
+    logging.info("Ingesting document %s (%s)", document.id, path)
+
+    db.query(DocumentChunk).filter(DocumentChunk.document_id == document.id).delete()
+
+    chunks: List[DocumentChunk] = []
+    chunk_index = 0
+
+    try:
+        documents = parsing_loader(str(path), ext)
+
+        if documents:
+            chunked_docs = chunking_strategy(documents)
+
+            for c in chunked_docs:
+                page_no = c.metadata.get("page") if c.metadata else None
+                page_no = c.metadata.get("page_number") if page_no is None and c.metadata else page_no
+
+                chunk = DocumentChunk(
+                    document_id=document.id,
+                    chunk_index=chunk_index,
+                    text=c.page_content,
+                    page_start=page_no,
+                    page_end=page_no,
+                )
+                chunks.append(chunk)
+                chunk_index += 1
+
+        for c in chunks:
+            db.add(c)
+
+        db.commit()
+        logging.info("Ingested %d chunks for document %s", len(chunks), document.id)
+
+        try:
+            chunk_ids = [c.id for c in chunks]
+            vector_index.add_chunks(db, chunk_ids, embed_texts)
+            logging.info(
+                "Added %d chunks to vector index for document %s",
+                len(chunk_ids),
+                document.id,
+            )
+        except Exception as e:
+            logging.exception(
+                "Error adding chunks to vector index for document %s: %s",
+                document.id,
+                e,
+            )
+
+    except Exception as e:
+        db.rollback()
+        logging.exception("Error ingesting document %s: %s", document.id, e)

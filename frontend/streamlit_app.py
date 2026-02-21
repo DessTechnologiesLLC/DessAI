@@ -1030,7 +1030,7 @@ with tab_upload:
 
         uploaded_file = st.file_uploader(
             "Choose file",
-            type=["pdf", "docx", "doc", "txt", "xlsx", "xls", "ppt", "pptx"],
+            type=["pdf", "docx", "doc", "txt", "csv", "xlsx", "xls", "pptx", "ppt"],
         )
 
         external_document_id = st.text_input(

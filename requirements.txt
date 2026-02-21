@@ -67,6 +67,15 @@ reportlab==4.2.2
 pytest==8.3.2
 python-multipart==0.0.9
 docx2txt==0.8
+nltk
+
+langchain-community 
+unstructured 
+openpyxl
+msoffcrypto-tool
+langchain-text-splitters
+python-pptx
+python-magic
 nltk==3.9.2
 
 altair==5.5.0
